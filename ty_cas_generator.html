@@ -135,7 +135,7 @@ input[type=file] { display: none; }
       <button class="btn btn-p" id="btnGo" disabled>开始计算</button>
       <button class="btn btn-s" id="btnCopy" disabled>复制 JSON</button>
       <button class="btn btn-s" id="btnDl" disabled>下载 JSON</button>
-      <button class="btn btn-p" id="btnZip" disabled>下载 .cas 压缩包</button>
+      <button class="btn btn-p" id="btnZip" disabled>下载 .cas 文件</button>
       <button class="btn btn-s" id="btnClear" disabled>清空</button>
     </div>
     <div class="stat" id="stat" style="margin-top:12px;"></div>
@@ -181,7 +181,7 @@ const ZipWriter = {
       const dv = new DataView(lh.buffer);
       dv.setUint32(0, 0x04034b50, true);   // signature
       dv.setUint16(4, 20, true);            // version needed
-      dv.setUint16(6, 0, true);             // flags
+      dv.setUint16(6, 0x0800, true);        // flags: bit 11 = UTF-8 filename
       dv.setUint16(8, 0, true);             // compression: store
       dv.setUint16(10, 0, true);            // mod time
       dv.setUint16(12, 0x21, true);         // mod date (1980-01-01)
@@ -207,7 +207,7 @@ const ZipWriter = {
       dv.setUint32(0, 0x02014b50, true);    // signature
       dv.setUint16(4, 20, true);            // version made by
       dv.setUint16(6, 20, true);            // version needed
-      dv.setUint16(8, 0, true);             // flags
+      dv.setUint16(8, 0x0800, true);        // flags: bit 11 = UTF-8 filename
       dv.setUint16(10, 0, true);            // compression: store
       dv.setUint16(12, 0, true);            // mod time
       dv.setUint16(14, 0x21, true);         // mod date
@@ -488,6 +488,8 @@ function outputJson() {
   $('btnCopy').disabled = false;
   $('btnDl').disabled = false;
   $('btnZip').disabled = false;
+  // 根据文件数量动态更新按钮文字
+  $('btnZip').textContent = data.length === 1 ? '下载 .cas 文件' : '下载 .cas 压缩包';
 }
 
 $('btnCopy').onclick = () => {
@@ -528,6 +530,20 @@ $('btnZip').onclick = () => {
     };
   });
 
+  // 单文件：直接下载 .cas，不打包 ZIP
+  if (files.length === 1) {
+    const blob = new Blob([files[0].data], { type: 'application/octet-stream' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = files[0].name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    $('btnZip').textContent = '已下载!';
+    setTimeout(() => $('btnZip').textContent = '下载 .cas 文件', 1500);
+    return;
+  }
+
+  // 多文件：打包 ZIP（无子目录，文件名扁平）
   const zipBytes = ZipWriter.build(files);
   const blob = new Blob([zipBytes], { type: 'application/zip' });
   const a = document.createElement('a');
