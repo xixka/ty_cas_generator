@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>天翼云盘秒传 JSON 生成器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --border: #334155;
+  --text: #e2e8f0;
+  --dim: #94a3b8;
+  --accent: #3b82f6;
+  --accent-h: #2563eb;
+  --ok: #22c55e;
+  --err: #ef4444;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 24px;
+}
+.wrap { max-width: 800px; margin: 0 auto; }
+h1 { font-size: 22px; margin-bottom: 4px; }
+.sub { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card-t { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+.drop {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+}
+.drop:hover, .drop.over { border-color: var(--accent); background: rgba(59,130,246,.05); }
+.drop-icon { font-size: 28px; margin-bottom: 6px; }
+.drop-text { color: var(--dim); font-size: 13px; }
+input[type=file] { display: none; }
+.flist { margin-top: 12px; }
+.frow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.frow.done { border-left: 3px solid var(--ok); }
+.frow.work { border-left: 3px solid var(--accent); }
+.frow.fail { border-left: 3px solid var(--err); }
+.frow .name { flex: 1; word-break: break-all; }
+.frow .size { color: var(--dim); white-space: nowrap; font-family: monospace; }
+.frow .st { font-size: 12px; white-space: nowrap; min-width: 40px; text-align: right; }
+.st.done { color: var(--ok); }
+.st.work { color: var(--accent); }
+.st.fail { color: var(--err); }
+.st.wait { color: var(--dim); }
+.pbar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+.pbar > div { height: 100%; background: var(--accent); transition: width .2s; }
+.btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn {
+  padding: 9px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .2s;
+}
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-p { background: var(--accent); color: #fff; }
+.btn-p:hover:not(:disabled) { background: var(--accent-h); }
+.btn-s { background: var(--border); color: var(--text); }
+.btn-s:hover { background: #475569; }
+.out {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  font-family: 'SF Mono','Consolas',monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 500px;
+  overflow-y: auto;
+}
+.stat {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--dim);
+  margin-bottom: 12px;
+}
+.stat b { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚡ 天翼云盘秒传 JSON 生成器</h1>
+  <p class="sub">选择文件 → 自动计算 md5 + slice_md5 → 输出秒传 JSON</p>
+
+  <div class="card">
+    <div class="card-t">📁 选择文件（支持多选）</div>
+    <div class="drop" id="drop">
+      <div class="drop-icon">📂</div>
+      <div class="drop-text">点击选择文件，或拖拽文件到此处</div>
+    </div>
+    <input type="file" id="finput" multiple>
+    <div class="flist" id="flist"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-t">🚀 操作</div>
+    <div class="btns">
+      <button class="btn btn-p" id="btnGo" disabled>开始计算</button>
+      <button class="btn btn-s" id="btnCopy" disabled>复制 JSON</button>
+      <button class="btn btn-s" id="btnDl" disabled>下载 JSON</button>
+      <button class="btn btn-p" id="btnZip" disabled>下载 .cas 压缩包</button>
+      <button class="btn btn-s" id="btnClear" disabled>清空</button>
+    </div>
+    <div class="stat" id="stat" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card" id="outCard" style="display:none;">
+    <div class="card-t">📋 输出 JSON</div>
+    <div class="out" id="out"></div>
+  </div>
+</div>
+
+<script>
+// ── 内嵌 ZIP 打包器 (store only, no compression) ──
+// 仅 STORE 模式，浏览器纯 JS 实现，无外部依赖
+const ZipWriter = {
+  crc32Table: (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[i] = c;
+    }
+    return t;
+  })(),
+  crc32(data) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < data.length; i++) c = this.crc32Table[(c ^ data[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  },
+  // files: [{name, data: Uint8Array}]
+  build(files) {
+    const chunks = [];
+    const entries = [];
+    let offset = 0;
+
+    for (const f of files) {
+      const nameBytes = new TextEncoder().encode(f.name);
+      const crc = this.crc32(f.data);
+      const size = f.data.length;
+
+      // Local file header
+      const lh = new Uint8Array(30 + nameBytes.length);
+      const dv = new DataView(lh.buffer);
+      dv.setUint32(0, 0x04034b50, true);   // signature
+      dv.setUint16(4, 20, true);            // version needed
+      dv.setUint16(6, 0, true);             // flags
+      dv.setUint16(8, 0, true);             // compression: store
+      dv.setUint16(10, 0, true);            // mod time
+      dv.setUint16(12, 0x21, true);         // mod date (1980-01-01)
+      dv.setUint32(14, crc, true);          // crc32
+      dv.setUint32(18, size, true);         // compressed size
+      dv.setUint32(22, size, true);         // uncompressed size
+      dv.setUint16(26, nameBytes.length, true); // name length
+      dv.setUint16(28, 0, true);            // extra length
+      lh.set(nameBytes, 30);
+      chunks.push(lh);
+      chunks.push(f.data);
+
+      entries.push({ nameBytes, crc, size, offset });
+      offset += lh.length + f.data.length;
+    }
+
+    // Central directory
+    const cdStart = offset;
+    let cdSize = 0;
+    for (const e of entries) {
+      const cd = new Uint8Array(46 + e.nameBytes.length);
+      const dv = new DataView(cd.buffer);
+      dv.setUint32(0, 0x02014b50, true);    // signature
+      dv.setUint16(4, 20, true);            // version made by
+      dv.setUint16(6, 20, true);            // version needed
+      dv.setUint16(8, 0, true);             // flags
+      dv.setUint16(10, 0, true);            // compression: store
+      dv.setUint16(12, 0, true);            // mod time
+      dv.setUint16(14, 0x21, true);         // mod date
+      dv.setUint32(16, e.crc, true);
+      dv.setUint32(20, e.size, true);
+      dv.setUint32(24, e.size, true);
+      dv.setUint16(28, e.nameBytes.length, true);
+      dv.setUint16(30, 0, true);            // extra
+      dv.setUint16(32, 0, true);            // comment
+      dv.setUint16(34, 0, true);            // disk number
+      dv.setUint16(36, 0, true);            // internal attrs
+      dv.setUint32(38, 0, true);            // external attrs
+      dv.setUint32(42, e.offset, true);     // local header offset
+      cd.set(e.nameBytes, 46);
+      chunks.push(cd);
+      cdSize += cd.length;
+    }
+
+    // End of central directory
+    const eocd = new Uint8Array(22);
+    const dv = new DataView(eocd.buffer);
+    dv.setUint32(0, 0x06054b50, true);     // signature
+    dv.setUint16(4, 0, true);              // disk number
+    dv.setUint16(6, 0, true);              // disk with CD
+    dv.setUint16(8, entries.length, true); // entries on disk
+    dv.setUint16(10, entries.length, true); // total entries
+    dv.setUint32(12, cdSize, true);        // CD size
+    dv.setUint32(16, cdStart, true);       // CD offset
+    dv.setUint16(20, 0, true);             // comment length
+    chunks.push(eocd);
+
+    // 合并
+    const total = chunks.reduce((s, c) => s + c.length, 0);
+    const result = new Uint8Array(total);
+    let pos = 0;
+    for (const c of chunks) { result.set(c, pos); pos += c.length; }
+    return result;
+  }
+};
+
+const SLICE = 10 * 1024 * 1024; // 10MB
+let queue = [];   // {file, state: wait|work|done|fail, md5, sliceMd5}
+let running = false;
+
+const $ = id => document.getElementById(id);
+const dropEl = $('drop');
+const fileInput = $('finput');
+
+dropEl.addEventListener('click', () => fileInput.click());
+dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('over'); });
+dropEl.addEventListener('dragleave', () => dropEl.classList.remove('over'));
+dropEl.addEventListener('drop', e => {
+  e.preventDefault();
+  dropEl.classList.remove('over');
+  if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files && e.target.files.length) addFiles(e.target.files);
+  e.target.value = '';
+});
+
+function addFiles(files) {
+  for (const f of files) {
+    queue.push({ file: f, state: 'wait', md5: '', sliceMd5: '' });
+  }
+  renderList();
+  $('btnGo').disabled = false;
+  $('btnClear').disabled = false;
+}
+
+function renderList() {
+  const el = $('flist');
+  el.innerHTML = '';
+  queue.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'frow ' + item.state;
+    const stText = { wait:'等待', work:'计算中', done:'✓', fail:'✗' }[item.state];
+    row.innerHTML = `
+      <div class="name">${esc(item.file.name)}</div>
+      <div class="size">${fmt(item.file.size)}</div>
+      <div class="st ${item.state}">${stText}</div>
+    `;
+    el.appendChild(row);
+  });
+  updateStat();
+}
+
+function updateStat() {
+  const total = queue.length;
+  const done = queue.filter(q => q.state === 'done').length;
+  const fail = queue.filter(q => q.state === 'fail').length;
+  const work = queue.filter(q => q.state === 'work').length;
+  $('stat').innerHTML = total
+    ? `共 <b>${total}</b> 个文件 · 完成 <b>${done}</b> · 失败 <b>${fail}</b> · 进行中 <b>${work}</b>`
+    : '';
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(b) {
+  if (b < 1048576) return (b/1024).toFixed(1)+'KB';
+  if (b < 1073741824) return (b/1048576).toFixed(2)+'MB';
+  return (b/1073741824).toFixed(2)+'GB';
+}
+
+// ── MD5 (Uint8Array → hex) ──
+// 使用 Web Crypto API（浏览器原生），回退到修正的纯JS实现
+async function md5Hex(bytes) {
+  // 优先使用浏览器原生 crypto.subtle.digest
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    try {
+      const hashBuffer = await crypto.subtle.digest('MD5', bytes);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    } catch (e) {
+      // 部分浏览器不支持 MD5，回退到纯JS
+    }
+  }
+  return md5HexPureJS(bytes);
+}
+
+// 修正的纯 JS MD5 实现（使用 DataView 避免符号位问题）
+function md5HexPureJS(bytes) {
+  function A(x,y){const l=(x&65535)+(y&65535),m=(x>>16)+(y>>16)+(l>>16);return((m<<16)|(l&65535))>>>0}
+  function R(n,c){return((n<<c)|(n>>>(32-c)))>>>0}
+  function G(q,a,b,x,s,t){return A(R(A(A(a,q),A(x,t))>>>0,s),b)}
+  function FF(a,b,c,d,x,s,t){return G((b&c)|(~b&d),a,b,x,s,t)}
+  function GG(a,b,c,d,x,s,t){return G((b&d)|(c&~d),a,b,x,s,t)}
+  function HH(a,b,c,d,x,s,t){return G(b^c^d,a,b,x,s,t)}
+  function II(a,b,c,d,x,s,t){return G(c^(b|~d),a,b,x,s,t)}
+
+  const n = bytes.length;
+  const wlen = (((n + 8) >>> 6) + 1) << 4;
+
+  // 使用 DataView 正确地进行字节到 32 位小端整数的转换
+  const buf = new ArrayBuffer(wlen * 4);
+  const dv = new DataView(buf);
+  for (let i = 0; i < n; i++) dv.setUint8(i, bytes[i]);
+  dv.setUint8(n, 0x80);
+  // 64 位 bit length，小端序
+  const bitLen = n * 8;
+  dv.setUint32(wlen * 4 - 8, bitLen >>> 0, true);
+  dv.setUint32(wlen * 4 - 4, Math.floor(bitLen / 0x100000000), true);
+
+  // 读取为 32 位小端整数数组
+  const w = new Uint32Array(wlen);
+  for (let i = 0; i < wlen; i++) w[i] = dv.getUint32(i * 4, true);
+
+  // 标准 MD5 初始化常量
+  let a = 0x67452301 | 0;
+  let b = 0xEFCDAB89 | 0;
+  let c = 0x98BADCFE | 0;
+  let d = 0x10325476 | 0;
+
+  for (let i = 0; i < w.length; i += 16) {
+    const oa = a, ob = b, oc = c, od = d;
+    a=FF(a,b,c,d,w[i],7,-680876936);d=FF(d,a,b,c,w[i+1],12,-389564586);
+    c=FF(c,d,a,b,w[i+2],17,606105819);b=FF(b,c,d,a,w[i+3],22,-1044525330);
+    a=FF(a,b,c,d,w[i+4],7,-176418897);d=FF(d,a,b,c,w[i+5],12,1200080426);
+    c=FF(c,d,a,b,w[i+6],17,-1473231341);b=FF(b,c,d,a,w[i+7],22,-45705983);
+    a=FF(a,b,c,d,w[i+8],7,1770035416);d=FF(d,a,b,c,w[i+9],12,-1958414417);
+    c=FF(c,d,a,b,w[i+10],17,-42063);b=FF(b,c,d,a,w[i+11],22,-1990404162);
+    a=FF(a,b,c,d,w[i+12],7,1804603682);d=FF(d,a,b,c,w[i+13],12,-40341101);
+    c=FF(c,d,a,b,w[i+14],17,-1502002290);b=FF(b,c,d,a,w[i+15],22,1236535329);
+    a=GG(a,b,c,d,w[i+1],5,-165796510);d=GG(d,a,b,c,w[i+6],9,-1069501632);
+    c=GG(c,d,a,b,w[i+11],14,643717713);b=GG(b,c,d,a,w[i],20,-373897302);
+    a=GG(a,b,c,d,w[i+5],5,-701558691);d=GG(d,a,b,c,w[i+10],9,38016083);
+    c=GG(c,d,a,b,w[i+15],14,-660478335);b=GG(b,c,d,a,w[i+4],20,-405537848);
+    a=GG(a,b,c,d,w[i+9],5,568446438);d=GG(d,a,b,c,w[i+14],9,-1019803690);
+    c=GG(c,d,a,b,w[i+3],14,-187363961);b=GG(b,c,d,a,w[i+8],20,1163531501);
+    a=GG(a,b,c,d,w[i+13],5,-1444681467);d=GG(d,a,b,c,w[i+2],9,-51403784);
+    c=GG(c,d,a,b,w[i+7],14,1735328473);b=GG(b,c,d,a,w[i+12],20,-1926607734);
+    a=HH(a,b,c,d,w[i+5],4,-378558);d=HH(d,a,b,c,w[i+8],11,-2022574463);
+    c=HH(c,d,a,b,w[i+11],16,1839030562);b=HH(b,c,d,a,w[i+14],23,-35309556);
+    a=HH(a,b,c,d,w[i+1],4,-1530992060);d=HH(d,a,b,c,w[i+4],11,1272893353);
+    c=HH(c,d,a,b,w[i+7],16,-155497632);b=HH(b,c,d,a,w[i+10],23,-1094730640);
+    a=HH(a,b,c,d,w[i+13],4,681279174);d=HH(d,a,b,c,w[i],11,-358537222);
+    c=HH(c,d,a,b,w[i+3],16,-722521979);b=HH(b,c,d,a,w[i+6],23,76029189);
+    a=HH(a,b,c,d,w[i+9],4,-640364487);d=HH(d,a,b,c,w[i+12],11,-421815835);
+    c=HH(c,d,a,b,w[i+15],16,530742520);b=HH(b,c,d,a,w[i+2],23,-995338651);
+    a=II(a,b,c,d,w[i],6,-198630844);d=II(d,a,b,c,w[i+7],10,1126891415);
+    c=II(c,d,a,b,w[i+14],15,-1416354905);b=II(b,c,d,a,w[i+5],21,-57434055);
+    a=II(a,b,c,d,w[i+12],6,1700485571);d=II(d,a,b,c,w[i+3],10,-1894986606);
+    c=II(c,d,a,b,w[i+10],15,-1051523);b=II(b,c,d,a,w[i+1],21,-2054922799);
+    a=II(a,b,c,d,w[i+8],6,1873313359);d=II(d,a,b,c,w[i+15],10,-30611744);
+    c=II(c,d,a,b,w[i+6],15,-1560198380);b=II(b,c,d,a,w[i+13],21,1309151649);
+    a=II(a,b,c,d,w[i+4],6,-145523070);d=II(d,a,b,c,w[i+11],10,-1120210379);
+    c=II(c,d,a,b,w[i+2],15,718787259);b=II(b,c,d,a,w[i+9],21,-343485551);
+    a=A(a,oa);b=A(b,ob);c=A(c,oc);d=A(d,od);
+  }
+
+  const hex = '0123456789abcdef';
+  let r = '';
+  for (const v of [a, b, c, d]) {
+    for (let j = 0; j < 4; j++) {
+      r += hex.charAt((v >>> (j * 8 + 4)) & 0xf);
+      r += hex.charAt((v >>> (j * 8)) & 0xf);
+    }
+  }
+  return r.toUpperCase();
+}
+
+// ── 异步分块读取 + MD5 ──
+async function readFileMd5(file) {
+  // slice_md5: 前 10MB 的 MD5
+  const sliceSize = Math.min(SLICE, file.size);
+  const sliceBuf = await file.slice(0, sliceSize).arrayBuffer();
+  const sliceMd5 = await md5Hex(new Uint8Array(sliceBuf));
+
+  // 全文件 MD5：分块读取拼接
+  const chunkSize = 8 * 1024 * 1024;
+  const chunks = [];
+  let off = 0;
+  while (off < file.size) {
+    const end = Math.min(off + chunkSize, file.size);
+    const buf = await file.slice(off, end).arrayBuffer();
+    chunks.push(new Uint8Array(buf));
+    off = end;
+    // 让出 UI 线程
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  // 合并
+  const all = new Uint8Array(file.size);
+  let pos = 0;
+  for (const ch of chunks) { all.set(ch, pos); pos += ch.length; }
+
+  const fullMd5 = await md5Hex(all);
+  return { md5: fullMd5, sliceMd5 };
+}
+
+// ── 主流程 ──
+$('btnGo').onclick = async () => {
+  if (running) return;
+  running = true;
+  $('btnGo').disabled = true;
+  $('btnClear').disabled = true;
+
+  for (const item of queue) {
+    if (item.state === 'done') continue;
+    item.state = 'work';
+    renderList();
+    try {
+      const { md5, sliceMd5 } = await readFileMd5(item.file);
+      item.md5 = md5;
+      item.sliceMd5 = sliceMd5;
+      item.state = 'done';
+    } catch (e) {
+      item.state = 'fail';
+      console.error(e);
+    }
+    renderList();
+  }
+
+  running = false;
+  $('btnGo').disabled = false;
+  $('btnClear').disabled = false;
+  outputJson();
+};
+
+function buildJson() {
+  return queue
+    .filter(q => q.state === 'done')
+    .map(q => ({
+      md5: q.md5,
+      slice_md5: q.sliceMd5,
+      size: q.file.size,
+      name: q.file.name,
+      cloud: '189'
+    }));
+}
+
+function outputJson() {
+  const data = buildJson();
+  if (!data.length) return;
+  const json = JSON.stringify(data, null, 2);
+  $('out').textContent = json;
+  $('outCard').style.display = '';
+  $('btnCopy').disabled = false;
+  $('btnDl').disabled = false;
+  $('btnZip').disabled = false;
+}
+
+$('btnCopy').onclick = () => {
+  const text = JSON.stringify(buildJson(), null, 2);
+  navigator.clipboard.writeText(text).then(() => {
+    $('btnCopy').textContent = '已复制!';
+    setTimeout(() => $('btnCopy').textContent = '复制 JSON', 1500);
+  });
+};
+
+$('btnDl').onclick = () => {
+  const text = JSON.stringify(buildJson(), null, 2);
+  const blob = new Blob([text], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cas_' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+$('btnZip').onclick = () => {
+  const done = queue.filter(q => q.state === 'done');
+  if (!done.length) return;
+
+  // 每个文件生成一个 .cas JSON
+  const files = done.map(q => {
+    const obj = {
+      md5: q.md5,
+      slice_md5: q.sliceMd5,
+      size: q.file.size,
+      name: q.file.name,
+      cloud: '189'
+    };
+    const json = JSON.stringify(obj, null, 2);
+    return {
+      name: q.file.name + '.cas',
+      data: new TextEncoder().encode(json)
+    };
+  });
+
+  const zipBytes = ZipWriter.build(files);
+  const blob = new Blob([zipBytes], { type: 'application/zip' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cas_files_' + new Date().toISOString().slice(0, 10) + '.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+
+  $('btnZip').textContent = '已下载!';
+  setTimeout(() => $('btnZip').textContent = '下载 .cas 压缩包', 1500);
+};
+
+$('btnClear').onclick = () => {
+  if (running) return;
+  queue = [];
+  renderList();
+  $('outCard').style.display = 'none';
+  $('btnGo').disabled = true;
+  $('btnCopy').disabled = true;
+  $('btnDl').disabled = true;
+  $('btnZip').disabled = true;
+  $('btnClear').disabled = true;
+  $('stat').innerHTML = '';
+};
+</script>
+</body>
+</html>
