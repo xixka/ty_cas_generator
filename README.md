@@ -1,6 +1,6 @@
 # ⚡ 天翼云盘秒传 JSON 生成器
 
-纯浏览器端工具，为天翼云盘文件生成秒传所需的 MD5 指纹 JSON。配合[秒传助手](https://greasyfork.org/zh-CN/scripts/427403)浏览器扩展使用。
+纯浏览器端工具，为天翼云盘文件生成秒传所需的 MD5 指纹 JSON。配合[秒传助手](https://greasyfork.org/zh-CN/scripts/577019-%E5%A4%A9%E7%BF%BC%E4%BA%91%E7%9B%98%E7%A7%92%E4%BC%A0%E5%8A%A9%E6%89%8B)浏览器扩展使用。
 
 ## ✨ 特性
 
